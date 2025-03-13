@@ -1,0 +1,153 @@
+---
+title: "Quarto Homework"
+format: html
+editor: visual
+---
+
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+## Project Overview
+This project has two raw data files at different scales from a study of infants, children, and adults watching a series of seven video clips.
+
+### Steps Overview
+- **Steps 1 and 2**: Import and merge the data (kept for reference)
+- **Step 3**: Exploratory Data Analysis (EDA)
+
+## Source Description
+
+### File 1: auc.csv
+- `stim`: Stimulus video (levels/labels provided below)
+- `id`: Unique participant identifier
+- `age`: Age in days
+- `AUC_sal`: Area-under-the-curve for a saliency model
+- `AUC_dist`: Area-under-the-curve for a distance model
+
+AUC values indicate how well each model predicted where participants looked when watching a video. These values range from 0-1, where 0.5 is chance level and 1 is perfect prediction.
+
+### File 2: participants_info_full_headers.csv
+- `id`: Unique participant identifier (matches auc.csv)
+- `age_group`: Categorical age variable with levels:
+  - `.5-1 y`, `1-1.5 y`, `1.5-2 y`, `2-4 y`, `4-6 y`, `8-10 y`, `adult`
+- `precision`: A quality measure of the eye data (smaller is better)
+- Seven columns indicating whether the participant had seen the stimulus video before the study (`SEEN (1)`, `NOT SEEN (2)`, `NOT SURE (3)`).
+
+## Step 1: Read in AUC Data and Code Stim as a Factor
+
+```{r}
+auc <- read_csv(here("data_raw", "auc_bystim.csv"))
+
+stim_levels <- 1:7
+stim_labels <- c("Fallon", "Feist", "Pentatonix", "Science", "Rube", "Plane", "Dogs")
+auc <- auc %>% mutate(stim = factor(stim, levels = stim_levels, labels = stim_labels))
+```
+
+## Step 2: Read and Wrangle Participant Info Data
+
+- Wrangle the participant info data for merging.
+- Drop missing AUC values.
+- Ensure the `watched` variable is coded as a factor.
+- Save the cleaned file.
+
+```{r}
+ppt <- read_csv(here("data_raw", "participants_info_full_headers.csv")) %>%
+  rename(id = `participant ID`, age_group = `Age group`, precision = "Precision")
+
+ppt_long <- ppt %>%
+  pivot_longer(cols = starts_with("Seen"), names_to = "stim", values_to = "watched") %>%
+  separate(stim, into = c(NA, "stim")) %>%
+  mutate(
+    stim = factor(stim, levels = stim_labels, labels = stim_labels),
+    watched = factor(watched, levels = 1:3, labels = c("Yes", "No", "Not Sure"))
+  )
+
+ds <- left_join(auc, ppt_long, by = c("id", "stim")) %>%
+  drop_na(AUC_sal:AUC_dist)
+
+ds %>% write_csv(here("data_cleaned", "cleaned.csv"))
+```
+
+## Step 3: Exploratory Data Analysis (EDA)
+
+### 3A: Precision Analysis
+
+#### Visualize the Distribution of Precision
+
+```{r}
+ds %>% ggplot(aes(x = precision)) +
+  geom_histogram() +
+  geom_vline(xintercept = 2.5)
+```
+
+#### Identify Participants with Precision > 2.5
+
+```{r}
+ds %>%
+  group_by(id, age_group) %>%
+  summarize(precision = mean(precision, na.rm = TRUE)) %>%
+  filter(precision > 2.5)
+```
+
+```{r}
+ds %>% filter(precision > 2.5)
+```
+
+#### Investigate Precision Differences by Age Group
+
+```{r}
+ds %>%
+  group_by(age_group) %>%
+  summarize(across(precision, list(M = mean, MIN = min, MAX = max)))
+```
+
+```{r}
+ds %>% ggplot(aes(x = age_group, y = precision)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 2.5)
+```
+
+```{r}
+ds %>% ggplot(aes(x = age, y = precision)) +
+  geom_point() +
+  geom_hline(yintercept = 2.5)
+```
+
+### 3B: Age Verification
+
+#### Convert Age to Years
+
+```{r}
+ds <- ds %>% mutate(age_years = age / 365.25)
+```
+
+#### Visualize Age in Years by Age Group
+
+```{r}
+ds %>%
+  group_by(id, age_group) %>%
+  summarize(age_years = mean(age_years)) %>%
+  ggplot(aes(y = age_group, x = age_years)) +
+  geom_boxplot()
+```
+
+#### Facet by Age Group for Better Comparison
+
+```{r}
+ds %>%
+  group_by(id, age_group) %>%
+  summarize(age_years = mean(age_years)) %>%
+  ggplot(aes(y = age_years)) +
+  geom_boxplot() +
+  facet_wrap("age_group", scales = "free")
+```
+
+#### Summary Table of Age in Years by Age Group
+
+```{r}
+ds %>%
+  group_by(age_group) %>%
+  summarize(min_age = min(age_years), max_age = max(age_years))
+```
